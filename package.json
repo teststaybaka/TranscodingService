@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "start": "nodejs server.js 2>&1 >> nodejs.log"
+  },
   "dependencies": {
+    "googleapis": "~2.1.5",
+    "gcloud": "~0.24.0"
   }
 }
