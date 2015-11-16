@@ -1,60 +1,66 @@
-var express = require('express');
-var path = require('path');
-var favicon = require('serve-favicon');
-var logger = require('morgan');
+var express = require("express");
 var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
-
-var routes = require('./routes/index');
-var users = require('./routes/users');
-
 var app = express();
+var fs = require('fs');
+var spawn = require('child_process').spawn;
+var gcloud = require('gcloud');
+var multer = require('multer');
 
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'jade');
+app.set('views', 'static');
+app.set('view engine', 'ejs');
+app.engine('html', require('ejs').renderFile);
 
-// uncomment after placing your favicon in /public
-//app.use(favicon(__dirname + '/public/favicon.ico'));
-app.use(logger('dev'));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', routes);
-app.use('/users', users);
-
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  var err = new Error('Not Found');
-  err.status = 404;
-  next(err);
+app.get('/', function(req, res, next) {
+    res.render('index.html');
 });
 
-// error handlers
+var uploading = multer({
+    dest: 'uploads',
+    limits: {fileSize: 5000000000, files:1},
+});
 
-// development error handler
-// will print stacktrace
-if (app.get('env') === 'development') {
-  app.use(function(err, req, res, next) {
-    res.status(err.status || 500);
-    res.render('error', {
-      message: err.message,
-      error: err
+var storage = gcloud.storage({
+    projectId: 'dan-tube'
+});
+
+
+var width = 640;
+var height = 480;
+var args = ['-i', '1.mp4', '-y', '-c:a', 'libfdk_aac', '-b:a', '320k', '-filter:v', 'scale=iw*min('+width+'/iw\\, '+height+'/ih):ih*min('+width+'/iw\\, '+height+'/ih), pad='+width+':'+height+':('+width+'-iw*min('+width+'/iw\\, '+height+'/ih))/2:('+height+'-ih*min('+width+'/iw\\, '+height+'/ih))/2', '-c:v', 'libx264', '-b:v', '800k', '-maxrate', '1200k', '-bufsize', '2000k', '-profile:v', 'main', '-level', '4.0', '-pix_fmt', 'yuv420p', '-r:v', '24', '-movflags', 'faststart', 'test.mp4'];
+
+
+var bucket = storage.bucket('dantube-videos');
+
+app.post('/', uploading.any(), function(req, res ){
+    console.log(req.files);
+    var filename = req.files[0].filename+".mp4";
+    var localpath = 'videos/'+filename;
+    args[1] = req.files[0].path;
+    args[27] = localpath;
+    var worker = spawn('ffmpeg', args);
+    worker.stdout.on('data', function (data) {
+        console.log(data.toString());
     });
-  });
-}
-
-// production error handler
-// no stacktraces leaked to user
-app.use(function(err, req, res, next) {
-  res.status(err.status || 500);
-  res.render('error', {
-    message: err.message,
-    error: {}
-  });
+    worker.stderr.on('data', function (data) {
+        console.log(data.toString());
+    });
+    worker.on('close', function (code) {
+        console.log('ffmpeg worker exited with code:'+code);
+        bucket.upload(localpath, {destination: filename}, function(err) {
+            if (err) {
+                console.log('video upload error:'+JSON.stringify(err));
+            } else {
+                console.log('video uploaded successfully');
+                fs.unlink(localpath);
+                fs.unlink(req.files[0].path);
+            }
+        });
+    });
+    res.redirect("/");
 });
 
+app.listen(3000);
 
-module.exports = app;
+console.log("Server running");
