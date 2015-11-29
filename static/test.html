@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <title>Submit</title>
 </head>
-    <form method="post" action="/upload" name="submit">
-        <input type="text" name="test-field"><br/><br/>
-        <input type="submit" value="Submit">
+    <form method="post" action="/upload" name="submit" enctype="multipart/form-data">
+        <input type="file" name="test-field"><br/><br/>
+        <input type="file" name="test-field2"><br/><br/>
+        <input type="file" name="test-field3"><br/><br/>
+        <input type="submit" name="submit" value="Submit">
     </form>
 </html>

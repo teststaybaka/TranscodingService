@@ -17,7 +17,7 @@ function array2string(bytes) {
     return new Buffer(bytes).toString('utf8');
 }
 
-function parseFormdata(request, boundary_str, post_max, post_multipart_max, success, fail) {
+function FormdataParser(request, boundary_str, fieldname_max, post_max, post_multipart_max) {
     var self = this;
     var start_boundary = string2array(boundary_str);
     var content_boundary = string2array('\r\n'+boundary_str);
@@ -102,7 +102,7 @@ function parseFormdata(request, boundary_str, post_max, post_multipart_max, succ
                     cur_writestream.end();
                 } else {
                     if (start_index < 0) {
-                        console.log('remain!!!!!!!!!')
+                        console.log('remain!!!!!!!!!', start_index, end_index)
                         cur_writestream.write(content_boundary_buffer.slice(0, - start_index));
                         cur_writestream.end(cur_chunk.slice(0, end_index+1));
                     } else {
@@ -338,12 +338,25 @@ function parseFormdata(request, boundary_str, post_max, post_multipart_max, succ
         return ok;
     }
 
-    var cur_state = this.start_boundary_state;
-
-    request.body = data;
-    request.on('data', function(chunk) {
-        try{
-            var ok = self.parse_chunk(chunk);
+    this.parse = function(success, fail) {
+        request.body = data;
+        request.on('data', function(chunk) {
+            try{
+                var ok = self.parse_chunk(chunk);
+            } catch(e) {
+                console.log(e, e.stack)
+                fail(e);
+                for (name in request.body) {
+                    var field = request.body[name];
+                    if (field.filename) {
+                        fs.unlink(field.tmp_filepath);
+                    }
+                }
+                request.destroy();
+                request.closed = true;
+                return;
+            }
+            
             if (!ok) {
                 // console.log('Back pressure!')
                 request.pause();
@@ -351,34 +364,25 @@ function parseFormdata(request, boundary_str, post_max, post_multipart_max, succ
                     request.resume();
                 });
             }
-        } catch(e) {
-            console.log(e, e.stack)
-            fail(e);
+        });
+
+        request.on('close', function() {
+            console.log('Request closed!');
             for (name in request.body) {
                 var field = request.body[name];
                 if (field.filename) {
                     fs.unlink(field.tmp_filepath);
                 }
             }
-            request.destroy();
             request.closed = true;
-        }
-    });
+        });
 
-    request.on('close', function() {
-        console.log('Request closed!');
-        for (name in request.body) {
-            var field = request.body[name];
-            if (field.filename) {
-                fs.unlink(field.tmp_filepath);
-            }
-        }
-        request.closed = true;
-    });
+        request.on('end', function() {
+            success();
+        });
+    }
 
-    request.on('end', function() {
-        success();
-    });
+    var cur_state = this.start_boundary_state;
 }
 
-module.exports = parseFormdata;
+module.exports = FormdataParser;

@@ -3,7 +3,7 @@ var https = require('https');
 var fs = require('fs');
 var querystring = require('querystring');
 var stream = require('stream');
-var parseFormData = require('./formdataparser.js');
+var FormdataParser = require('./formdataparser.js');
 
 Array.prototype.last = function(index) {
     return this[this.length - index];
@@ -15,6 +15,7 @@ function Router() {
     var rules = [];
     var templateDir = './';
 
+    var fieldname_max = 1024;
     var post_max = 1<<20;
     var post_multipart_max = 2147483648;
     var key_value_reg = /^(.*?)=(.*)$/;
@@ -79,7 +80,7 @@ function Router() {
                     request.content_type = content_type;
                     if (content_type === 'multipart/form-data' && content_type_parts.length === 2 && form_boundary_reg.test(content_type_parts[1])) {
                         var boundary_str = '--'+content_type_parts[1].match(form_boundary_reg)[1];
-                        parseFormData(request, boundary_str, post_max, post_multipart_max, function() {
+                        new FormdataParser(request, boundary_str, fieldname_max, post_max, post_multipart_max).parse(function() {
                             if (!request.closed) {
                                 console.log('finished');
                                 rule.callback(request, response, match);
@@ -95,7 +96,7 @@ function Router() {
 
                             if (data_string.length > post_max) {
                                 self.notAllowed(response);
-                                request.connection.destroy();
+                                request.destroy();
                             }
                         });
 
@@ -112,13 +113,13 @@ function Router() {
 
                             if (size > post_multipart_max) {
                                 self.notAllowed(response);
-                                request.connection.destroy();
+                                request.destroy();
                                 fs.unlink(tmp_filepath);
                             }
                         }).pipe(writestream);
 
                         writestream.on('finish', function() {
-                            fs.fsstat(tmp_filepath, function(error, stat) {
+                            fs.stat(tmp_filepath, function(error, stat) {
                                 if (error) { throw error; }
                                 request.body = {
                                     content_type: content_type,
@@ -204,8 +205,7 @@ function Router() {
 
     this.notFound = function(response) {
         response.writeHead(404, {'Content-Type': 'text/plain'});
-        response.write('404 Not Found\n');
-        response.end();
+        response.end('404 Not Found\n');
     }
 
     this.notAllowed = function(response) {
