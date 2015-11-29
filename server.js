@@ -11,6 +11,12 @@ router.get(/^\/$/, function(request, response) {
     router.render(response, 'index.html');
 });
 
-router.post(/^\/upload$/, function(request, response) {
+router.get(/^\/test$/, function(request, response) {
+    router.render(response, 'test.html');
+});
 
+router.post(/^\/upload$/, function(request, response) {
+    console.log(request.content_type);
+    console.log(request.body);
+    router.redirect(response, '/');
 });

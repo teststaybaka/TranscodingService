@@ -3,7 +3,7 @@ var https = require('https');
 var fs = require('fs');
 var querystring = require('querystring');
 var stream = require('stream');
-var FormDataParser = require('./formdataparser.js');
+var parseFormData = require('./formdataparser.js');
 
 Array.prototype.last = function(index) {
     return this[this.length - index];
@@ -15,8 +15,8 @@ function Router() {
     var rules = [];
     var templateDir = './';
 
-    var post_max = 1e4;
-    var post_multipart_max = 1e10;
+    var post_max = 1<<20;
+    var post_multipart_max = 2147483648;
     var key_value_reg = /^(.*?)=(.*)$/;
     var form_boundary_reg = /^.*boundary=(.*)$/;
     var suffix_reg = /\.(.*?)$/;
@@ -76,13 +76,16 @@ function Router() {
                 if (rule.method === 'POST') {
                     var content_type_parts = request.headers['content-type'].split(';');
                     var content_type = content_type_parts[0];
-                    console.log('start:');
-
+                    request.content_type = content_type;
                     if (content_type === 'multipart/form-data' && content_type_parts.length === 2 && form_boundary_reg.test(content_type_parts[1])) {
                         var boundary_str = '--'+content_type_parts[1].match(form_boundary_reg)[1];
-                        var parser = new FormDataParser(request, boundary_str, post_max, post_multipart_max);
-                        parser.on('finished', function() {
-                            rule.callback(request, response, match);
+                        parseFormData(request, boundary_str, post_max, post_multipart_max, function() {
+                            if (!request.closed) {
+                                console.log('finished');
+                                rule.callback(request, response, match);
+                            }
+                        }, function(e) {
+                            self.notAllowed(response);
                         });
                     } else if (content_type === 'application/x-www-form-urlencoded') {
                         var data_string = '';
@@ -92,6 +95,7 @@ function Router() {
 
                             if (data_string.length > post_max) {
                                 self.notAllowed(response);
+                                request.connection.destroy();
                             }
                         });
 
@@ -102,15 +106,26 @@ function Router() {
                     } else {
                         var tmp_filepath = './tmp/tmpfile'+Date.now();
                         var writestream = fs.createWriteStream(tmp_filepath, {defaultEncoding: 'binary'});
-                        request.pipe(writestream);
+                        var size = 0;
+                        request.on('data', function(chunk) {
+                            size += chunk.length;
+
+                            if (size > post_multipart_max) {
+                                self.notAllowed(response);
+                                request.connection.destroy();
+                                fs.unlink(tmp_filepath);
+                            }
+                        }).pipe(writestream);
+
                         writestream.on('finish', function() {
-                            fs.stat(tmp_filepath, function(error, stat) {
+                            fs.fsstat(tmp_filepath, function(error, stat) {
                                 if (error) { throw error; }
                                 request.body = {
                                     content_type: content_type,
-                                    tmp_filepath: tmp_filepath
-                                    content_length: stat.size,
+                                    tmp_filepath: tmp_filepath,
+                                    size: stat.size,
                                 }
+                                rule.callback(request, response, match);
                             }); 
                         });
                     }
@@ -196,7 +211,6 @@ function Router() {
     this.notAllowed = function(response) {
         response.writeHead(403, {'Content-Type': 'text/html'});
         response.end('done');
-        request.connection.destroy();
     }
 
     this.setTemplateDir = function(dir) {
